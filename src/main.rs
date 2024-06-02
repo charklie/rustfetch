@@ -1,7 +1,11 @@
 use colored::Color;
 use colored::Colorize;
+use rayon::iter::ParallelIterator;
+use rayon::str::ParallelString;
 use std::env;
+use std::io::Write;
 use std::mem;
+use tabwriter::TabWriter;
 
 mod ascii;
 mod color_config;
@@ -21,6 +25,7 @@ fn main() {
     let mut info_custom_config: Option<String> = None;
     let mut color_custom_config: Option<String> = None;
     let mut get_only_info: Option<String> = None;
+    let mut legacy: bool = false;
     let mut use_info_custom_config = true;
     let mut use_color_custom_config = true;
     let mut margin: i8 = 1;
@@ -37,6 +42,7 @@ fn main() {
                 use_color_custom_config = false;
                 use_info_custom_config = false;
             }
+            "-l" | "--legacy" => legacy = true,
             "-m" | "--margin" => {
                 if count + 1 < args.len() {
                     margin = args[count + 1].parse().unwrap();
@@ -61,7 +67,7 @@ fn main() {
                         "[{}] Missing argument for override, showing all possible.",
                         "WARNING".yellow()
                     );
-                    return ascii_test();
+                    return println!("{:?}\n{:?}", ascii_test(true), ascii_test(false));
                 }
             }
             "-i" | "--info-config" => {
@@ -100,6 +106,7 @@ fn main() {
             info_custom_config,
             color_custom_config,
             get_only_info,
+            legacy
         )
     );
 }
@@ -158,6 +165,7 @@ fn info(
     custom_info_config_file: Option<String>,
     custom_color_config_file: Option<String>,
     get_only_info: Option<String>,
+    legacy: bool,
 ) -> String {
     let distro = InfoItem {
         title: "distro",
@@ -308,7 +316,10 @@ fn info(
     };
 
     if get_only_info.is_some() {
-        return format!("{}", parse_info(get_only_info.unwrap()).value.trim_matches('"'));
+        return format!(
+            "{}",
+            parse_info(get_only_info.unwrap()).value.trim_matches('"')
+        );
     }
 
     let info_set1 = parse_json_lists("info1");
@@ -317,7 +328,7 @@ fn info(
 
     let margin_spaces = " ".repeat(margin as usize);
     let distroascii = print_ascii(
-        get_distro_ascii(overriden_ascii),
+        get_distro_ascii(legacy, overriden_ascii),
         get_color_config(
             "color0".to_string(),
             use_custom_color_config,
@@ -330,25 +341,48 @@ fn info(
     let infos2 = (2, info_set2);
     let infos3 = (3, info_set3);
     let mut info_sets = vec![infos1, infos2, infos3];
+    let mut complete_data = Vec::new();
 
-    println!("{}\n", distroascii);
-
-    for (idx, infos) in info_sets.iter_mut().enumerate() {
-        if idx > 0 {
-            println!();
-        }
-
-        loop_over_data(
+    for infos in info_sets.iter_mut() {
+        complete_data.push(loop_over_data(
             &mut infos.1,
             margin_spaces.clone(),
             infos.0,
             use_custom_color_config,
             custom_color_config_file.clone(),
-        );
+        ) + "\n");
+    }
+
+    match legacy {
+        true => {
+            println!("{}{}", distroascii, complete_data.join("\n"));
+        }
+        false => {
+            side_by_side(distroascii.as_str(), complete_data.join("\n").as_str());
+        }
     }
 
     String::new()
 }
+
+
+fn side_by_side(str1: &str, str2: &str) {
+    let lines1: Vec<&str> = str1.lines().collect();
+    let lines2: Vec<&str> = str2.lines().collect();
+    let max_lines = lines1.len().max(lines2.len());
+    let mut max_left_width = 0;
+    
+    for line in &lines1 {
+        max_left_width = max_left_width.max(line.len());
+    }
+
+    for i in 0..max_lines {
+        let left = lines1.get(i).unwrap_or(&"").trim_end();
+        let right = lines2.get(i).unwrap_or(&"").trim_end();
+        println!("{:<width$}{}", left, right.trim(), width = max_left_width);
+    }
+}
+
 
 fn loop_over_data(
     list: &mut Vec<InfoItem>,
@@ -356,9 +390,10 @@ fn loop_over_data(
     section: i8,
     use_custom_config: bool,
     custom_color_config_file: Option<String>,
-) {
+) -> String {
     list.retain(|s| !s.value.is_empty());
     let len = list.len();
+    let mut data = Vec::new();
 
     for (idx, item) in list.clone().iter().enumerate() {
         let color = get_color_config(
@@ -375,6 +410,8 @@ fn loop_over_data(
             "├─"
         };
 
-        println!("{}{}", margin, print_data(item, color, connector));
+        data.push(format!("{}{}", margin, print_data(item, color, connector)));
     }
+
+    data.join("\n")
 }
