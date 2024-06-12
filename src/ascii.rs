@@ -1,6 +1,6 @@
 use crate::fns::{get_os_release_pretty_name, uname_s};
 use colored::Color;
-use rayon::str::ParallelString;
+use colored::Colorize;
 
 const ARCH_LOGO: (&str, Color) = ("                  sMN-
                  +MMMm`
@@ -79,10 +79,10 @@ macro_rules! get_os {
             // if $legacy {
             //     $legacy_return_string.to_string()
             // } else {
-            match $search_string.to_ascii_lowercase().as_str() {
+            (match $search_string.to_ascii_lowercase().as_str() {
                 "arch" => ARCH_LOGO,
                 _ => RUST_LOGO,
-            }
+            }.0.color($modern_return_string.1).to_string().as_str(), $modern_return_string.1)
             // }
         } else {
             RUST_LOGO
